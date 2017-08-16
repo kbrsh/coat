@@ -1,2 +1,2 @@
 # Build Coat
-gcc -Wall -c ./src/coat.c -o ./dist/coat
+gcc-7 -Wall ./src/coat.c -o dist/coat
