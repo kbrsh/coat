@@ -1,10 +1,14 @@
 require "http/server"
 
-response = HTTP::Client.get "http://rawgit.com/kbrsh/moon/master/dist/moon.js"
+# response = HTTP::Client.get "http://rawgit.com/kbrsh/moon/master/dist/moon.js"
 
 server = HTTP::Server.new(3000) do |ctx|
   ctx.response.content_type = "text/plain"
-  ctx.response.print response.body
+  if ctx.request.path == "/test"
+    ctx.response.print "Hello Coat! Test Route."
+  else
+    ctx.response.print "Hello Coat!"
+  end
 end
 
 server.listen

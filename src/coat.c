@@ -38,13 +38,17 @@ void handle(const char *clientPort, int clientSocketFD) {
 
   freeaddrinfo(addrs);
 
-  while((length = read(clientSocketFD, buffer, SIZE)) != 0) {
-    write(backendSocketFD, buffer, length);
-  }
+  length = read(clientSocketFD, buffer, SIZE);
+  write(backendSocketFD, buffer, length);
+  // while((length = read(clientSocketFD, buffer, SIZE)) != 0) {
+  //   write(backendSocketFD, buffer, length);
+  // }
 
-  while((length = read(backendSocketFD, buffer, SIZE)) != 0) {
-    write(clientSocketFD, buffer, length);
-  }
+  length = read(backendSocketFD, buffer, SIZE);
+  write(clientSocketFD, buffer, length);
+  // while((length = read(backendSocketFD, buffer, SIZE)) != 0) {
+  //   write(clientSocketFD, buffer, length);
+  // }
   close(clientSocketFD);
 }
 
