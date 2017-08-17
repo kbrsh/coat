@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <errno.h>
 
 #define SIZE 4096
 
@@ -37,22 +38,13 @@ void handle(const char *clientPort, int clientSocketFD) {
 
   freeaddrinfo(addrs);
 
-  length = read(clientSocketFD, buffer, SIZE);
-  write(backendSocketFD, buffer, length);
-  if(length == SIZE) {
-    while((length = read(clientSocketFD, buffer, SIZE)) != 0) {
-      write(backendSocketFD, buffer, length);
-    }
+  while((length = read(clientSocketFD, buffer, SIZE)) != 0) {
+    write(backendSocketFD, buffer, length);
   }
 
-  length = read(backendSocketFD, buffer, SIZE);
-  write(clientSocketFD, buffer, length);
-  if(length == SIZE) {
-    while((length = read(backendSocketFD, buffer, SIZE)) != 0) {
-      write(clientSocketFD, buffer, length);
-    }
+  while((length = read(backendSocketFD, buffer, SIZE)) != 0) {
+    write(clientSocketFD, buffer, length);
   }
-
   close(clientSocketFD);
 }
 
