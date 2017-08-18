@@ -24,7 +24,7 @@ int handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   while(1) {
     length = read(clientSocketFD, buffer, SIZE);
     if(length < 0) {
-      return 0;
+      return 1;
     } else if(length == 0) {
       break;
     } else {
@@ -34,7 +34,6 @@ int handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
 
   while(1) {
     length = read(backendSocketFD, buffer, SIZE);
-
     if(length <= 0) {
       return 0;
     } else {
@@ -78,7 +77,8 @@ int main(int argc, const char *argv[]) {
   int ret;
 
   // Return value for handler
-  int handleRet;
+  int clean = 0;
+  int handleRet = 1;
 
   // Connect to backend
   backendHints.ai_family = AF_UNSPEC;
@@ -86,7 +86,7 @@ int main(int argc, const char *argv[]) {
 
   getaddrinfo(host, clientPort, &backendHints, &backendAddrs);
   backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-  fcntl(backendSocketFD, F_SETFL, (fcntl(backendSocketFD, F_GETFL) | O_NONBLOCK));
+  fcntl(backendSocketFD, F_SETFL, (fcntl(backendSocketFD, F_GETFL, 0) | O_NONBLOCK));
   connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
   freeaddrinfo(backendAddrs);
 
@@ -98,7 +98,7 @@ int main(int argc, const char *argv[]) {
   getaddrinfo(NULL, port, &hints, &addrs);
   serverSocketFD = socket(addrs->ai_family, addrs->ai_socktype, addrs->ai_protocol);
   setsockopt(serverSocketFD, SOL_SOCKET, SO_REUSEADDR, &reuseAddr, sizeof(reuseAddr));
-  fcntl(serverSocketFD, F_SETFL, (fcntl(serverSocketFD, F_GETFL) | O_NONBLOCK));
+  fcntl(serverSocketFD, F_SETFL, (fcntl(serverSocketFD, F_GETFL, 0) | O_NONBLOCK));
   bind(serverSocketFD, addrs->ai_addr, addrs->ai_addrlen);
   freeaddrinfo(addrs);
   listen(serverSocketFD, 1);
@@ -123,13 +123,11 @@ int main(int argc, const char *argv[]) {
           // Readable file descriptor
           if(fds[i].fd == serverSocketFD) {
             // Listening socket can accept connections
-            while((clientSocketFD = accept(serverSocketFD, NULL, NULL)) != -1 || errno != EWOULDBLOCK) {
+            while((clientSocketFD = accept(serverSocketFD, NULL, NULL)) != -1) {
               // Add client socket to polling list
               if(nfds == POLL_SIZE) {
                 realloc(fds, (++POLL_SIZE) * (sizeof(struct pollfd)));
               }
-
-              // fcntl(clientSocketFD, F_SETFL, (fcntl(clientSocketFD, F_GETFL) | O_NONBLOCK));
 
               fds[nfds].fd = clientSocketFD;
               fds[nfds].events = POLLIN;
@@ -142,12 +140,15 @@ int main(int argc, const char *argv[]) {
             if(handleRet == 0) {
               close(fds[i].fd);
               fds[i].fd = -1;
+              if(clean == 0) {
+                clean = 1;
+              }
             }
           }
         }
       }
 
-      if(handleRet == 0) {
+      if(clean == 1) {
         for(i = 0; i < nfds; i++) {
           if(fds[i].fd == -1) {
             for(j = i; j < nfds; j++) {
