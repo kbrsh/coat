@@ -110,43 +110,40 @@ int main(int argc, const char *argv[]) {
     ret = poll(fds, nfds, -1);
 
     if(ret != -1) {
+      if(fds[0].revents == POLLIN) {
+        // Listening socket can accept connections
+        while((clientSocketFD = accept(serverSocketFD, NULL, NULL)) != -1) {
+          // Add client socket to polling list
+          if(nfds == POLL_SIZE) {
+            realloc(fds, (++POLL_SIZE) * (sizeof(struct pollfd)));
+          }
+
+          fds[nfds].fd = clientSocketFD;
+          fds[nfds].events = POLLIN;
+          nfds++;
+        }
+      }
+
       // Go through all file descriptors
-      for(i = 0; i < nfds; i++) {
-        if(fds[i].revents == 0) {
-          continue;
-        } else if(fds[i].revents == POLLIN) {
-          // Readable file descriptor
-          if(fds[i].fd == serverSocketFD) {
-            // Listening socket can accept connections
-            while((clientSocketFD = accept(serverSocketFD, NULL, NULL)) != -1) {
-              // Add client socket to polling list
-              if(nfds == POLL_SIZE) {
-                realloc(fds, (++POLL_SIZE) * (sizeof(struct pollfd)));
-              }
-
-              fds[nfds].fd = clientSocketFD;
-              fds[nfds].events = POLLIN;
-              nfds++;
-            }
+      for(i = 1; i < nfds; i++) {
+        if(fds[i].revents == POLLIN) {
+          // Client socket can accept connections
+          backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
+          ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+          
+          if(ret != -1) {
+            handle(clientPort, fds[i].fd, backendSocketFD);
           } else {
-            // Client socket can accept connections
-            backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-            ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+            error("Could not establish connection with backend.");
+          }
 
-            if(ret != -1) {
-              handle(clientPort, fds[i].fd, backendSocketFD);
-            } else {
-              error("Could not establish connection with backend.");
-            }
+          close(backendSocketFD);
 
-            close(backendSocketFD);
+          close(fds[i].fd);
+          fds[i].fd = -1;
 
-            close(fds[i].fd);
-            fds[i].fd = -1;
-
-            if(clean == 0) {
-              clean = 1;
-            }
+          if(clean == 0) {
+            clean = 1;
           }
         }
       }
