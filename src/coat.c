@@ -12,7 +12,7 @@
 #define error(msg) printf("\x1b[31m[Coat] ERROR:\x1b[0m " msg "\n");
 
 #define SIZE 4096
-#define POLL_SIZE_CONST 10000
+#define POLL_SIZE_CONST 100000
 #define POLL_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
 
 int POLL_SIZE = POLL_SIZE_CONST;
@@ -21,7 +21,7 @@ static const char *port = "8000";
 
 void handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   int length;
-  int buffer[SIZE];
+  char buffer[SIZE];
 
   while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
     write(backendSocketFD, buffer, length);
@@ -29,7 +29,6 @@ void handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
 
   while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
     write(clientSocketFD, buffer, length);
-
     if(length < SIZE) {
       break;
     }
@@ -60,7 +59,7 @@ int main(int argc, const char *argv[]) {
   struct pollfd *fds = malloc(POLL_MEMORY_SIZE);
 
   // Number of File Descriptors to Poll
-  int nfds = 2;
+  int nfds = 1;
 
   // Iterators
   int i, j;
@@ -130,7 +129,7 @@ int main(int argc, const char *argv[]) {
           // Client socket can accept connections
           backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
           ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
-          
+
           if(ret != -1) {
             handle(clientPort, fds[i].fd, backendSocketFD);
           } else {
