@@ -9,6 +9,8 @@
 #include <poll.h>
 #include <errno.h>
 
+#define error(msg) printf("\x1b[31m[Coat] ERROR:\x1b[0m " msg "\n");
+
 #define SIZE 4096
 #define POLL_SIZE_CONST 10000
 #define POLL_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
@@ -21,23 +23,15 @@ void handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   int length;
   int buffer[SIZE];
 
-  while(1) {
-    length = read(clientSocketFD, buffer, SIZE);
-    if(length < 0) {
-      break;
-    } else if(length == 0) {
-      break;
-    } else {
-      write(backendSocketFD, buffer, length);
-    }
+  while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
+    write(backendSocketFD, buffer, length);
   }
 
-  while(1) {
-    length = read(backendSocketFD, buffer, SIZE);
-    if(length <= 0) {
+  while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
+    write(clientSocketFD, buffer, length);
+
+    if(length < SIZE) {
       break;
-    } else {
-      write(clientSocketFD, buffer, length);
     }
   }
 }
@@ -66,7 +60,7 @@ int main(int argc, const char *argv[]) {
   struct pollfd *fds = malloc(POLL_MEMORY_SIZE);
 
   // Number of File Descriptors to Poll
-  int nfds = 1;
+  int nfds = 2;
 
   // Iterators
   int i, j;
@@ -84,7 +78,12 @@ int main(int argc, const char *argv[]) {
 
   getaddrinfo(host, clientPort, &backendHints, &backendAddrs);
   backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-  connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+  ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+
+  if(ret == -1) {
+    error("Could not connect to backend.");
+  }
+
   freeaddrinfo(backendAddrs);
 
   // Listen on port
@@ -99,10 +98,16 @@ int main(int argc, const char *argv[]) {
   fcntl(serverSocketFD, F_SETFL, (fcntl(serverSocketFD, F_GETFL, 0) | O_NONBLOCK));
   bind(serverSocketFD, addrs->ai_addr, addrs->ai_addrlen);
   freeaddrinfo(addrs);
-  listen(serverSocketFD, 1);
+  ret = listen(serverSocketFD, SIZE);
+
+  if(ret == -1) {
+    error("Could not listen on specified port.");
+  }
+
+  // Clear polling list
+  memset(fds, 0, POLL_MEMORY_SIZE);
 
   // Add listening file descriptor to polling list
-  memset(fds, 0, POLL_MEMORY_SIZE);
   fds[0].fd = serverSocketFD;
   fds[0].events = POLLIN;
 
@@ -145,7 +150,7 @@ int main(int argc, const char *argv[]) {
       }
 
       if(clean == 1) {
-        for(i = 0; i < nfds; i++) {
+        for(i = 1; i < nfds; i++) {
           if(fds[i].fd == -1) {
             for(j = i; j < nfds; j++) {
               fds[j] = fds[j + 1];
