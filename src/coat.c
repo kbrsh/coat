@@ -77,14 +77,6 @@ int main(int argc, const char *argv[]) {
   backendHints.ai_protocol = 0;
 
   getaddrinfo(host, clientPort, &backendHints, &backendAddrs);
-  backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-  ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
-
-  if(ret == -1) {
-    error("Could not connect to backend.");
-  }
-
-  freeaddrinfo(backendAddrs);
 
   // Listen on port
   hints.ai_family = AF_UNSPEC;
@@ -138,7 +130,17 @@ int main(int argc, const char *argv[]) {
             }
           } else {
             // Client socket can accept connections
-            handle(clientPort, fds[i].fd, backendSocketFD);
+            backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
+            ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+
+            if(ret != -1) {
+              handle(clientPort, fds[i].fd, backendSocketFD);
+            } else {
+              error("Could not establish connection with backend.");
+            }
+
+            close(backendSocketFD);
+
             close(fds[i].fd);
             fds[i].fd = -1;
 
@@ -149,6 +151,7 @@ int main(int argc, const char *argv[]) {
         }
       }
 
+      // Clean closed connections
       if(clean == 1) {
         for(i = 1; i < nfds; i++) {
           if(fds[i].fd == -1) {
@@ -157,10 +160,12 @@ int main(int argc, const char *argv[]) {
             }
           }
         }
+        clean = 0;
       }
     }
   }
 
+  freeaddrinfo(backendAddrs);
   free(fds);
   return 0;
 }
