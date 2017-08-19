@@ -35,7 +35,7 @@ int handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   while(1) {
     length = read(backendSocketFD, buffer, SIZE);
     if(length <= 0) {
-      return 0;
+      return 1;
     } else {
       write(clientSocketFD, buffer, length);
     }
@@ -76,9 +76,8 @@ int main(int argc, const char *argv[]) {
   // Return value for system calls
   int ret;
 
-  // Return value for handler
+  // Clean
   int clean = 0;
-  int handleRet = 1;
 
   // Connect to backend
   backendHints.ai_family = AF_UNSPEC;
@@ -135,14 +134,12 @@ int main(int argc, const char *argv[]) {
             }
           } else {
             // Client socket can accept connections
-            handleRet = handle(clientPort, fds[i].fd, backendSocketFD);
+            handle(clientPort, fds[i].fd, backendSocketFD);
+            close(fds[i].fd);
+            fds[i].fd = -1;
 
-            if(handleRet == 0) {
-              close(fds[i].fd);
-              fds[i].fd = -1;
-              if(clean == 0) {
-                clean = 1;
-              }
+            if(clean == 0) {
+              clean = 1;
             }
           }
         }
