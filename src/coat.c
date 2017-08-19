@@ -17,14 +17,14 @@ int POLL_SIZE = POLL_SIZE_CONST;
 static const char *host = "127.0.0.1";
 static const char *port = "8000";
 
-int handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
+void handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   int length;
   int buffer[SIZE];
 
   while(1) {
     length = read(clientSocketFD, buffer, SIZE);
     if(length < 0) {
-      return 1;
+      break;
     } else if(length == 0) {
       break;
     } else {
@@ -35,13 +35,11 @@ int handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
   while(1) {
     length = read(backendSocketFD, buffer, SIZE);
     if(length <= 0) {
-      return 1;
+      break;
     } else {
       write(clientSocketFD, buffer, length);
     }
   }
-
-  return 1;
 }
 
 int main(int argc, const char *argv[]) {
@@ -82,16 +80,17 @@ int main(int argc, const char *argv[]) {
   // Connect to backend
   backendHints.ai_family = AF_UNSPEC;
   backendHints.ai_socktype = SOCK_STREAM;
+  backendHints.ai_protocol = 0;
 
   getaddrinfo(host, clientPort, &backendHints, &backendAddrs);
   backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-  fcntl(backendSocketFD, F_SETFL, (fcntl(backendSocketFD, F_GETFL, 0) | O_NONBLOCK));
   connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
   freeaddrinfo(backendAddrs);
 
   // Listen on port
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
+  backendHints.ai_protocol = 0;
   hints.ai_flags = AI_PASSIVE;
 
   getaddrinfo(NULL, port, &hints, &addrs);
