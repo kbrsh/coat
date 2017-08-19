@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <errno.h>
 
 #define error(msg) printf("\x1b[31m[Coat] ERROR:\x1b[0m " msg "\n");
@@ -19,20 +19,40 @@ int POLL_SIZE = POLL_SIZE_CONST;
 static const char *host = "127.0.0.1";
 static const char *port = "8000";
 
-void handle(const char *clientPort, int clientSocketFD, int backendSocketFD) {
+struct handleArguments {
+  int clientSocketFD;
+  struct addrinfo *backendAddrs;
+};
+
+void handle(void *argumentsPointer) {
+  int backendSocketFD;
   int length;
   char buffer[SIZE];
 
-  while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
-    write(backendSocketFD, buffer, length);
-  }
+  struct handleArguments *arguments = argumentsPointer;
+  int clientSocketFD = arguments->clientSocketFD;
+  struct addrinfo *backendAddrs = arguments->backendAddrs;
 
-  while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
-    write(clientSocketFD, buffer, length);
-    if(length < SIZE) {
-      break;
+  backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
+  length = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+
+  if(length == -1) {
+    error("Could not establish connection with backend.");
+  } else {
+    while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
+      write(backendSocketFD, buffer, length);
+    }
+
+    while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
+      write(clientSocketFD, buffer, length);
+      if(length < SIZE) {
+        break;
+      }
     }
   }
+
+  close(backendSocketFD);
+  close(clientSocketFD);
 }
 
 int main(int argc, const char *argv[]) {
@@ -50,7 +70,6 @@ int main(int argc, const char *argv[]) {
   // File descriptors for the client, server, and backend
   int clientSocketFD;
   int serverSocketFD;
-  int backendSocketFD;
 
   // Reuse address
   int reuseAddr = 1;
@@ -63,6 +82,9 @@ int main(int argc, const char *argv[]) {
 
   // Iterators
   int i, j;
+
+  // Thread ID
+  pthread_t tid;
 
   // Return value for system calls
   int ret;
@@ -127,20 +149,12 @@ int main(int argc, const char *argv[]) {
       for(i = 1; i < nfds; i++) {
         if(fds[i].revents == POLLIN) {
           // Client socket can accept connections
-          backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-          ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
-
-          if(ret != -1) {
-            handle(clientPort, fds[i].fd, backendSocketFD);
-          } else {
-            error("Could not establish connection with backend.");
-          }
-
-          close(backendSocketFD);
-
-          close(fds[i].fd);
+          struct handleArguments arguments;
+          arguments.clientSocketFD = fds[i].fd;
+          arguments.backendAddrs = backendAddrs;
+          pthread_create(&tid, NULL, (void *)&handle, (void *)&arguments);
+          pthread_detach(tid);
           fds[i].fd = -1;
-
           if(clean == 0) {
             clean = 1;
           }
