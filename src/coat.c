@@ -129,6 +129,7 @@ void handleThread(void *vargp) {
             // Client socket can accept connections
             handle(fds[i].fd);
             fds[i].fd = -1;
+            nfdsList[id]--;
             if(clean == 0) {
               clean = 1;
             }
@@ -137,7 +138,7 @@ void handleThread(void *vargp) {
 
         // Clean closed connections
         if(clean == 1) {
-          for(i = 1; i < nfds; i++) {
+          for(i = 0; i < nfds; i++) {
             if(fds[i].fd == -1) {
               for(j = i; j < nfds; j++) {
                 fds[j] = fds[j + 1];
@@ -173,6 +174,9 @@ int main(int argc, const char *argv[]) {
 
   // Iterator
   int i;
+
+  // Old Number of Items to Poll to Wake Thread
+  int oldNfds;
 
   // ID of thread to load balance
   int id;
@@ -227,10 +231,13 @@ int main(int argc, const char *argv[]) {
     if(clientSocketFD != -1) {
       id = i++;
       pthread_mutex_lock(&mutexes[id]);
-      fdsList[id][nfdsList[id]].fd = clientSocketFD;
-      fdsList[id][nfdsList[id]].events = POLLIN;
+      oldNfds = nfdsList[id];
+      fdsList[id][oldNfds].fd = clientSocketFD;
+      fdsList[id][oldNfds].events = POLLIN;
       nfdsList[id]++;
-      pthread_cond_signal(&conditions[id]);
+      if(oldNfds == 0) {
+        pthread_cond_signal(&conditions[id]);
+      }
       pthread_mutex_unlock(&mutexes[id]);
       printf("unlocked and loaded %d\n", nfdsList[id]);
       if(i == THREADS) {
