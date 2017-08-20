@@ -106,7 +106,7 @@ void handleThread(void *vargp) {
     pthread_mutex_lock(&mutexes[id]);
     fds = fdsList[id];
     nfds = nfdsList[id];
-    // printf("locked and in loop %d\n", nfds);
+
     if(state == 0) {
       pthread_mutex_unlock(&mutexes[id]);
       break;
