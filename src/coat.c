@@ -47,7 +47,7 @@ pthread_cond_t conditions[THREADS] = {PTHREAD_COND_INITIALIZER};
 pthread_mutex_t mutexes[THREADS] = {PTHREAD_MUTEX_INITIALIZER};
 
 // State of threads
-int state = 1;
+volatile int state = 1;
 
 // State of main thread
 volatile int running = 1;
