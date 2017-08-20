@@ -102,8 +102,6 @@ void handleThread(void *vargp) {
   // Return value of system calls
   int ret;
 
-  printf("thread started\n");
-
   while(1) {
     pthread_mutex_lock(&mutexes[id]);
     fds = fdsList[id];
@@ -116,11 +114,8 @@ void handleThread(void *vargp) {
       pthread_cond_wait(&conditions[id], &mutexes[id]);
       pthread_mutex_unlock(&mutexes[id]);
     } else {
-      printf("awaiting connection\n");
       // Poll until socket is ready to read
       ret = poll(fds, nfds, -1);
-
-      printf("connection\n");
 
       if(ret != -1) {
         // Go through all file descriptors
@@ -239,7 +234,6 @@ int main(int argc, const char *argv[]) {
         pthread_cond_signal(&conditions[id]);
       }
       pthread_mutex_unlock(&mutexes[id]);
-      printf("unlocked and loaded %d\n", nfdsList[id]);
       if(i == THREADS) {
         i = 0;
       }
