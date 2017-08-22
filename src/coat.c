@@ -15,9 +15,10 @@
 // Size of a buffer
 #define SIZE 4096
 
-// Amount of concurrent connections allowed per thread
-#define POLL_SIZE_CONST 100000
-#define POLL_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
+// Amount of concurrent connections allowed
+#define POLL_SIZE_CONST 10000
+#define POLL_MAIN_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
+#define POLL_MEMORY_SIZE (POLL_SIZE_CONST / 3) * (sizeof(int))
 
 // Amount of threads to use
 #define THREADS 3
@@ -31,10 +32,10 @@ static const char *port = "8000";
 struct addrinfo backendHints = {0};
 struct addrinfo *backendAddrs;
 
-// File Descriptors to Poll
-struct pollfd *fdsList[THREADS];
+// File Descriptors to Handle
+int *fdsList[THREADS];
 
-// Number of File Descriptors to Poll
+// Number of File Descriptors to Handle
 int nfdsList[THREADS] = {0};
 
 // Thread IDs
@@ -47,7 +48,7 @@ pthread_cond_t conditions[THREADS] = {PTHREAD_COND_INITIALIZER};
 pthread_mutex_t mutexes[THREADS] = {PTHREAD_MUTEX_INITIALIZER};
 
 // State of threads
-volatile int state = 1;
+volatile int states[THREADS];
 
 // State of main thread
 volatile int running = 1;
@@ -87,8 +88,10 @@ void handleThread(void *vargp) {
   // ID Of Thread
   int id = *(int*)vargp;
 
+  printf("thread %d created\n", id);
+
   // File Descriptors to Poll
-  struct pollfd *fds;
+  int *fds;
 
   // Number of File Descriptors to Poll
   int nfds;
@@ -99,51 +102,36 @@ void handleThread(void *vargp) {
   // Cleaning Status
   int clean = 0;
 
-  // Return value of system calls
-  int ret;
-
   while(1) {
     pthread_mutex_lock(&mutexes[id]);
-    fds = fdsList[id];
     nfds = nfdsList[id];
-
-    if(state == 0) {
+    if(states[id] == 0) {
+      printf("stopping thread %d\n", id);
       pthread_mutex_unlock(&mutexes[id]);
       break;
     } else if(nfds == 0) {
-      pthread_cond_wait(&conditions[id], &mutexes[id]);
       pthread_mutex_unlock(&mutexes[id]);
     } else {
-      // Poll until socket is ready to read
-      ret = poll(fds, nfds, -1);
-
-      if(ret != -1) {
-        // Go through all file descriptors
-        for(i = 0; i < nfds; i++) {
-          if(fds[i].revents == POLLIN) {
-            // Client socket can accept connections
-            handle(fds[i].fd);
-            fds[i].fd = -1;
-            nfdsList[id]--;
-            if(clean == 0) {
-              clean = 1;
-            }
-          }
-        }
-
-        // Clean closed connections
-        if(clean == 1) {
-          for(i = 0; i < nfds; i++) {
-            if(fds[i].fd == -1) {
-              for(j = i; j < nfds; j++) {
-                fds[j] = fds[j + 1];
-              }
-            }
-          }
-          clean = 0;
+      printf("thread going through connections\n");
+      fds = fdsList[id];
+      for(i = 0; i < nfds; i++) {
+        handle(fds[i]);
+        fds[i] = -1;
+        nfdsList[id]--;
+        if(clean == 0) {
+          clean = 1;
         }
       }
-
+      if(clean == 1) {
+        for(i = 0; i < nfds; i++) {
+          if(fds[i] == -1) {
+            for(j = i; j < nfds; j++) {
+              fds[j] = fds[j + 1];
+            }
+          }
+        }
+        clean = 0;
+      }
       pthread_mutex_unlock(&mutexes[id]);
     }
   }
@@ -168,13 +156,22 @@ int main(int argc, const char *argv[]) {
   int ret;
 
   // Iterator
-  int i;
+  int i, j;
 
-  // Old Number of Items to Poll to Wake Thread
-  int oldNfds;
+  // IDs of threads to create
+  int ids[THREADS];
+
+  // File Descriptors to Poll
+  struct pollfd *fds = malloc(POLL_MAIN_MEMORY_SIZE);
+
+  // Number of Items to Poll
+  int nfds = 1;
 
   // ID of thread to load balance
-  int id;
+  int id = 0;
+
+  // Cleaning Status
+  int clean = 0;
 
   // Get backend information
   backendHints.ai_family = AF_UNSPEC;
@@ -201,14 +198,25 @@ int main(int argc, const char *argv[]) {
     error("Could not listen on specified port.");
   }
 
-  // Setup polling lists, and start threads
+  // Setup main polling lists
+  memset(fds, 0, POLL_MAIN_MEMORY_SIZE);
+  fds[0].fd = serverSocketFD;
+  fds[0].events = POLLIN;
+
+  // Setup file descriptor lists, and start threads
   for(i = 0; i < THREADS; i++) {
-    // Create polling list
+    // Create state
+    states[i] = 1;
+
+    // Create ID
+    ids[i] = i;
+
+    // Create list
     fdsList[i] = malloc(POLL_MEMORY_SIZE);
     memset(fdsList[i], 0, POLL_MEMORY_SIZE);
 
     // Create thread
-    pthread_create(&tids[i], NULL, (void*)&handleThread, (void*)&i);
+    pthread_create(&tids[i], NULL, (void*)&handleThread, (void*)&ids[i]);
   }
 
   // Clear Memory when Process is Interrupted
@@ -217,41 +225,73 @@ int main(int argc, const char *argv[]) {
   // Log
   printf("======= Coat =======\n");
 
-  i = 0;
   while(running) {
     // Accept a connection
-    clientSocketFD = accept(serverSocketFD, NULL, NULL);
+    ret = poll(fds, nfds, -1);
 
     // Distribute to threads
-    if(clientSocketFD != -1) {
-      id = i++;
-      pthread_mutex_lock(&mutexes[id]);
-      oldNfds = nfdsList[id];
-      fdsList[id][oldNfds].fd = clientSocketFD;
-      fdsList[id][oldNfds].events = POLLIN;
-      nfdsList[id]++;
-      if(oldNfds == 0) {
-        pthread_cond_signal(&conditions[id]);
+    if(ret != -1) {
+      if(fds[0].revents == POLLIN) {
+        // Listening socket can accept connections
+        while((clientSocketFD = accept(serverSocketFD, NULL, NULL)) != -1) {
+          // Add client to polling list
+          if(nfds == POLL_SIZE) {
+            // Reallocate memory if clients exceed concurrency limit
+            realloc(fds, (++POLL_SIZE) * (sizeof(struct pollfd)));
+            for(i = 0; i < THREADS; i++) {
+              pthread_mutex_lock(&mutexes[i]);
+              realloc(fdsList[i], (POLL_SIZE) * (sizeof(struct pollfd)));
+              pthread_mutex_unlock(&mutexes[i]);
+            }
+          }
+
+          fds[nfds].fd = clientSocketFD;
+          fds[nfds].events = POLLIN;
+          nfds++;
+
+          printf("polling new connection\n");
+        }
       }
-      pthread_mutex_unlock(&mutexes[id]);
-      if(i == THREADS) {
-        i = 0;
+
+      for(i = 1; i < nfds; i++) {
+        if(fds[i].revents == POLLIN) {
+          pthread_mutex_lock(&mutexes[id]);
+          printf("new connection ready for I/O\n");
+          fdsList[id][nfdsList[id]] = fds[i].fd;
+          nfdsList[id]++;
+          printf("new nfds for thread %d is %d\n", id, nfdsList[id]);
+          fds[i].fd = -1;
+          nfds--;
+          pthread_mutex_unlock(&mutexes[id]);
+          if(clean == 0) {
+            clean = 1;
+          }
+          if((++id) == THREADS) {
+            id = 0;
+          }
+        }
+      }
+
+      if(clean == 1) {
+        for(i = 1; i < nfds; i++) {
+          if(fds[i].fd == -1) {
+            for(j = i; j < nfds; j++) {
+              fds[j] = fds[j + 1];
+            }
+          }
+        }
+        clean = 0;
       }
     }
   }
 
-  // Stop threads
-  for(i = 0; i < THREADS; i++) {
-    pthread_mutex_lock(&mutexes[i]);
-  }
-  state = 0;
-  for(i = 0; i < THREADS; i++) {
-    pthread_mutex_unlock(&mutexes[i]);
-  }
-
-  // Free memory
+  // Stop threads and free memory
   freeaddrinfo(backendAddrs);
   for(i = 0; i < THREADS; i++) {
+    pthread_mutex_lock(&mutexes[i]);
+    states[i] = 0;
+    pthread_mutex_unlock(&mutexes[i]);
+    printf("unlocked and set\n");
     pthread_join(tids[i], NULL);
     free(fdsList[i]);
   }
