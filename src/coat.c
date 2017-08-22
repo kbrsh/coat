@@ -74,6 +74,9 @@ void handle(int clientSocketFD) {
       if(ret == -1) {
         goto clean;
       }
+      if(length < SIZE) {
+        break;
+      }
     }
 
     while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
@@ -131,6 +134,9 @@ void handleThread(void *vargp) {
           if(fds[i] == -1) {
             for(j = i; j < nfds; j++) {
               fds[j] = fds[j + 1];
+            }
+            if(i != (nfds - 1)) {
+              i--;
             }
           }
         }
@@ -196,7 +202,7 @@ int main(int argc, const char *argv[]) {
   fcntl(serverSocketFD, F_SETFL, (fcntl(serverSocketFD, F_GETFL, 0) | O_NONBLOCK));
   bind(serverSocketFD, addrs->ai_addr, addrs->ai_addrlen);
   freeaddrinfo(addrs);
-  ret = listen(serverSocketFD, SIZE);
+  ret = listen(serverSocketFD, POLL_SIZE_CONST);
 
   if(ret == -1) {
     error("Could not listen on specified port.");
@@ -277,6 +283,9 @@ int main(int argc, const char *argv[]) {
           if(fds[i].fd == -1) {
             for(j = i; j < nfds; j++) {
               fds[j] = fds[j + 1];
+            }
+            if(i != (nfds - 1)) {
+              i--;
             }
           }
         }
