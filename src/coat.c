@@ -203,7 +203,7 @@ int main(int argc, const char *argv[]) {
   fds[0].fd = serverSocketFD;
   fds[0].events = POLLIN;
 
-  // Setup file descriptor lists, and start threads
+  // Setup file descriptor lists and start threads
   for(i = 0; i < THREADS; i++) {
     // Create state
     states[i] = 1;
