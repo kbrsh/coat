@@ -60,6 +60,7 @@ void terminate(int num) {
 void handle(int clientSocketFD) {
   int backendSocketFD;
   int length;
+  int ret;
   char buffer[SIZE];
 
   backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
@@ -69,26 +70,31 @@ void handle(int clientSocketFD) {
     error("Could not establish connection with backend.");
   } else {
     while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
-      write(backendSocketFD, buffer, length);
+      ret = write(backendSocketFD, buffer, length);
+      if(ret == -1) {
+        goto clean;
+      }
     }
 
     while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
-      write(clientSocketFD, buffer, length);
+      ret = write(clientSocketFD, buffer, length);
+      if(ret == -1) {
+        goto clean;
+      }
       if(length < SIZE) {
         break;
       }
     }
   }
 
-  close(backendSocketFD);
-  close(clientSocketFD);
+  clean:
+    close(backendSocketFD);
+    close(clientSocketFD);
 }
 
 void handleThread(void *vargp) {
   // ID Of Thread
   int id = *(int*)vargp;
-
-  printf("thread %d created\n", id);
 
   // File Descriptors to Poll
   int *fds;
@@ -106,13 +112,11 @@ void handleThread(void *vargp) {
     pthread_mutex_lock(&mutexes[id]);
     nfds = nfdsList[id];
     if(states[id] == 0) {
-      printf("stopping thread %d\n", id);
       pthread_mutex_unlock(&mutexes[id]);
       break;
     } else if(nfds == 0) {
       pthread_mutex_unlock(&mutexes[id]);
     } else {
-      printf("thread going through connections\n");
       fds = fdsList[id];
       for(i = 0; i < nfds; i++) {
         handle(fds[i]);
@@ -248,18 +252,14 @@ int main(int argc, const char *argv[]) {
           fds[nfds].fd = clientSocketFD;
           fds[nfds].events = POLLIN;
           nfds++;
-
-          printf("polling new connection\n");
         }
       }
 
       for(i = 1; i < nfds; i++) {
         if(fds[i].revents == POLLIN) {
           pthread_mutex_lock(&mutexes[id]);
-          printf("new connection ready for I/O\n");
           fdsList[id][nfdsList[id]] = fds[i].fd;
           nfdsList[id]++;
-          printf("new nfds for thread %d is %d\n", id, nfdsList[id]);
           fds[i].fd = -1;
           nfds--;
           pthread_mutex_unlock(&mutexes[id]);
@@ -291,7 +291,6 @@ int main(int argc, const char *argv[]) {
     pthread_mutex_lock(&mutexes[i]);
     states[i] = 0;
     pthread_mutex_unlock(&mutexes[i]);
-    printf("unlocked and set\n");
     pthread_join(tids[i], NULL);
     free(fdsList[i]);
   }
