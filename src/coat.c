@@ -53,6 +53,7 @@ volatile int states[THREADS];
 // State of main thread
 volatile int running = 1;
 
+// Terminate main thread
 void terminate(int num) {
   running = 0;
 }
