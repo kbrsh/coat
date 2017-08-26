@@ -58,6 +58,7 @@ void terminate(int num) {
   running = 0;
 }
 
+// Handle client connection
 void handle(int clientSocketFD) {
   int backendSocketFD;
   int length;
