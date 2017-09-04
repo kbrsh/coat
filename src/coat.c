@@ -297,6 +297,7 @@ int main(int argc, const char *argv[]) {
   }
 
   // Stop threads and free memory
+  free(fds);
   freeaddrinfo(backendAddrs);
   for(i = 0; i < THREADS; i++) {
     pthread_mutex_lock(&mutexes[i]);
