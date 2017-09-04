@@ -128,14 +128,13 @@ void handleThread(void *vargp) {
         handle(fds[i]);
         fds[i] = -1;
       }
-      for(i = 0; i < nfdsList[id]; i++) {
+      for(i = 0; i < nfdsList[id];) {
         if(fds[i] == -1) {
           for(j = i; j < (--nfdsList[id]); j++) {
             fds[j] = fds[j + 1];
           }
-          if(i != nfds) {
-            i--;
-          }
+        } else {
+          i++;
         }
       }
       pthread_mutex_unlock(&mutexes[id]);
@@ -267,14 +266,13 @@ int main(int argc, const char *argv[]) {
         }
       }
 
-      for(i = 0; i < nfds; i++) {
+      for(i = 0; i < nfds;) {
         if(fds[i].fd == -1) {
           for(j = i; j < (--nfds); j++) {
             fds[j] = fds[j + 1];
           }
-          if(i != nfds) {
-            i--;
-          }
+        } else {
+          i++;
         }
       }
     }
