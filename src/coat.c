@@ -15,13 +15,17 @@
 // Size of a buffer
 #define SIZE 4096
 
-// Amount of concurrent connections allowed
-#define POLL_SIZE_CONST 10000
-#define POLL_MAIN_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
-#define POLL_MEMORY_SIZE (POLL_SIZE_CONST / 3) * (sizeof(int))
-
 // Amount of threads to use
 #define THREADS 3
+
+// Amount of concurrent connections allowed per thread
+#define POLL_SIZE_CONST 1000
+
+// Size of all concurrent client connections
+#define POLL_MAIN_MEMORY_SIZE POLL_SIZE_CONST * (sizeof(struct pollfd))
+
+// Size of a thread's concurrent client connections
+#define POLL_MEMORY_SIZE (POLL_SIZE_CONST / THREADS) * (sizeof(int))
 
 // Global Configuration
 int POLL_SIZE = POLL_SIZE_CONST;
@@ -58,43 +62,43 @@ void terminate(int num) {
   running = 0;
 }
 
+// Transfer data between two sockets
+int transfer(int from, int to) {
+  int length = -1;
+  int ret;
+  char buffer[SIZE];
+  while((length = read(from, buffer, SIZE)) > 0) {
+    ret = write(to, buffer, length);
+    if(ret == -1) {
+      return -1;
+    }
+    if(length < SIZE) {
+      break;
+    }
+  }
+  return length;
+}
+
 // Handle client connection
 void handle(int clientSocketFD) {
   int backendSocketFD;
-  int length;
   int ret;
-  char buffer[SIZE];
 
   backendSocketFD = socket(backendAddrs->ai_family, backendAddrs->ai_socktype, backendAddrs->ai_protocol);
-  length = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
+  ret = connect(backendSocketFD, backendAddrs->ai_addr, backendAddrs->ai_addrlen);
 
-  if(length == -1) {
+  if(ret == -1) {
     error("Could not establish connection with backend.");
   } else {
-    while((length = read(clientSocketFD, buffer, SIZE)) > 0) {
-      ret = write(backendSocketFD, buffer, length);
-      if(ret == -1) {
-        goto clean;
-      }
-      if(length < SIZE) {
-        break;
-      }
-    }
+    ret = transfer(clientSocketFD, backendSocketFD);
 
-    while((length = read(backendSocketFD, buffer, SIZE)) > 0) {
-      ret = write(clientSocketFD, buffer, length);
-      if(ret == -1) {
-        goto clean;
-      }
-      if(length < SIZE) {
-        break;
-      }
+    if(ret != -1 || (errno == EWOULDBLOCK || errno == EAGAIN)) {
+      transfer(backendSocketFD, clientSocketFD);
     }
   }
 
-  clean:
-    close(backendSocketFD);
-    close(clientSocketFD);
+  close(backendSocketFD);
+  close(clientSocketFD);
 }
 
 void handleThread(void *vargp) {
@@ -110,9 +114,6 @@ void handleThread(void *vargp) {
   // Iterators
   int i, j;
 
-  // Cleaning Status
-  int clean = 0;
-
   while(1) {
     pthread_mutex_lock(&mutexes[id]);
     nfds = nfdsList[id];
@@ -126,23 +127,16 @@ void handleThread(void *vargp) {
       for(i = 0; i < nfds; i++) {
         handle(fds[i]);
         fds[i] = -1;
-        nfdsList[id]--;
-        if(clean == 0) {
-          clean = 1;
-        }
       }
-      if(clean == 1) {
-        for(i = 0; i < nfds; i++) {
-          if(fds[i] == -1) {
-            for(j = i; j < nfds; j++) {
-              fds[j] = fds[j + 1];
-            }
-            if(i != (nfds - 1)) {
-              i--;
-            }
+      for(i = 0; i < nfdsList[id]; i++) {
+        if(fds[i] == -1) {
+          for(j = i; j < (--nfdsList[id]); j++) {
+            fds[j] = fds[j + 1];
+          }
+          if(i != nfds) {
+            i--;
           }
         }
-        clean = 0;
       }
       pthread_mutex_unlock(&mutexes[id]);
     }
@@ -181,9 +175,6 @@ int main(int argc, const char *argv[]) {
 
   // ID of thread to load balance
   int id = 0;
-
-  // Cleaning Status
-  int clean = 0;
 
   // Get backend information
   backendHints.ai_family = AF_UNSPEC;
@@ -269,36 +260,36 @@ int main(int argc, const char *argv[]) {
           fdsList[id][nfdsList[id]] = fds[i].fd;
           nfdsList[id]++;
           fds[i].fd = -1;
-          nfds--;
           pthread_mutex_unlock(&mutexes[id]);
-          if(clean == 0) {
-            clean = 1;
-          }
           if((++id) == THREADS) {
             id = 0;
           }
         }
       }
 
-      if(clean == 1) {
-        for(i = 1; i < nfds; i++) {
-          if(fds[i].fd == -1) {
-            for(j = i; j < nfds; j++) {
-              fds[j] = fds[j + 1];
-            }
-            if(i != (nfds - 1)) {
-              i--;
-            }
+      for(i = 0; i < nfds; i++) {
+        if(fds[i].fd == -1) {
+          for(j = i; j < (--nfds); j++) {
+            fds[j] = fds[j + 1];
+          }
+          if(i != nfds) {
+            i--;
           }
         }
-        clean = 0;
       }
     }
   }
 
-  // Stop threads and free memory
+  // Close server socket
+  close(serverSocketFD);
+
+  // Free pending client connections
   free(fds);
+
+  // Free backend addresses
   freeaddrinfo(backendAddrs);
+
+  // Stop threads and free pending client connections
   for(i = 0; i < THREADS; i++) {
     pthread_mutex_lock(&mutexes[i]);
     states[i] = 0;
